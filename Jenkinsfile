@@ -91,7 +91,7 @@ pipeline {
     steps {
         echo '===== APPLICATION TESTS ====='
         bat 'cd app && npm ci'
-        bat 'app\\node_modules\\.bin\\jest tests\\orders.test.js --runInBand'
+        bat 'app\\node_modules\\.bin\\jest --runInBand --config=jest.config.js'
     }
 }
         stage('Docker Build') {
