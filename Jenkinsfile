@@ -73,10 +73,9 @@ pipeline {
 
                 script {
 
-                    if (!(params.VERSION ==~ /^\\d+\\.\\d+\\.\\d+$/)) {
-                        error("Invalid version: ${params.VERSION}")
-                    }
-
+                    if (!(params.VERSION ==~ /^\d+\.\d+\.\d+$/)) {
+    error("Invalid version: ${params.VERSION}")
+}
                     if (params.CONFIRM_PRODUCTION != 'YES') {
                         error(
                             'Production deployment requires CONFIRM_PRODUCTION=YES'
