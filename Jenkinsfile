@@ -50,6 +50,7 @@ pipeline {
 
         stage('Checkout') {
             steps {
+
                 echo '===== CHECKOUT ====='
 
                 bat 'git checkout main'
@@ -74,8 +75,9 @@ pipeline {
                 script {
 
                     if (!(params.VERSION ==~ /^\d+\.\d+\.\d+$/)) {
-    error("Invalid version: ${params.VERSION}")
-}
+                        error("Invalid version: ${params.VERSION}")
+                    }
+
                     if (params.CONFIRM_PRODUCTION != 'YES') {
                         error(
                             'Production deployment requires CONFIRM_PRODUCTION=YES'
@@ -87,26 +89,28 @@ pipeline {
             }
         }
 
-       stage('Unit/Application Test') {
-    steps {
-        echo '===== APPLICATION TESTS ====='
+        stage('Unit/Application Test') {
+            steps {
 
-        bat '''
-            echo ===== INSTALLING APPLICATION DEPENDENCIES =====
-            cd app
-            call npm ci --include=dev
+                echo '===== APPLICATION TESTS ====='
 
-            echo ===== CHECKING SUPERTEST =====
-            call npm list supertest
+                bat '''
+                    echo ===== INSTALLING APPLICATION DEPENDENCIES =====
+                    cd app
+                    call npm ci --include=dev
 
-            echo ===== RETURNING TO PROJECT ROOT =====
-            cd ..
+                    echo ===== CHECKING SUPERTEST =====
+                    call npm list supertest
 
-            echo ===== RUNNING JEST =====
-            call app\\node_modules\\.bin\\jest --runInBand --config=jest.config.js
-        '''
-    }
-}
+                    echo ===== RETURNING TO PROJECT ROOT =====
+                    cd ..
+
+                    echo ===== RUNNING JEST =====
+                    call app\\node_modules\\.bin\\jest --runInBand --config=jest.config.js
+                '''
+            }
+        }
+
         stage('Docker Build') {
             steps {
 
@@ -150,7 +154,11 @@ pipeline {
                     echo "Candidate: ${candidateContainer}"
                     echo "Candidate Port: ${candidatePort}"
 
+                    echo "===== REMOVING EXISTING CANDIDATE ====="
+
                     bat "docker rm -f ${candidateContainer} 2>nul || exit /b 0"
+
+                    echo "===== STARTING CANDIDATE CONTAINER ====="
 
                     bat """
                     docker run -d ^
@@ -229,22 +237,73 @@ pipeline {
 
                     if (env.CANDIDATE_CONTAINER == GREEN_CONTAINER) {
 
-                        bat """
-                        findstr /v "server orders-blue:3000;" proxy\\nginx.conf > proxy\\nginx.tmp
-                        echo         server orders-green:3000; >> proxy\\nginx.tmp
-                        move /Y proxy\\nginx.tmp proxy\\nginx.conf
-                        """
+                        echo '===== CONFIGURING NGINX FOR GREEN ====='
+
+                        bat '''
+                        (
+                            echo events {}
+                            echo.
+                            echo http {
+                            echo     upstream orders_backend {
+                            echo         server orders-green:3000;
+                            echo     }
+                            echo.
+                            echo     server {
+                            echo         listen 80;
+                            echo.
+                            echo         location / {
+                            echo             proxy_pass http://orders_backend;
+                            echo             proxy_set_header Host $host;
+                            echo             proxy_set_header X-Real-IP $remote_addr;
+                            echo             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                            echo         }
+                            echo     }
+                            echo }
+                        ) > proxy\\nginx.conf
+                        '''
 
                     } else {
 
-                        bat """
-                        findstr /v "server orders-green:3000;" proxy\\nginx.conf > proxy\\nginx.tmp
-                        echo         server orders-blue:3000; >> proxy\\nginx.tmp
-                        move /Y proxy\\nginx.tmp proxy\\nginx.conf
-                        """
+                        echo '===== CONFIGURING NGINX FOR BLUE ====='
+
+                        bat '''
+                        (
+                            echo events {}
+                            echo.
+                            echo http {
+                            echo     upstream orders_backend {
+                            echo         server orders-blue:3000;
+                            echo     }
+                            echo.
+                            echo     server {
+                            echo         listen 80;
+                            echo.
+                            echo         location / {
+                            echo             proxy_pass http://orders_backend;
+                            echo             proxy_set_header Host $host;
+                            echo             proxy_set_header X-Real-IP $remote_addr;
+                            echo             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                            echo         }
+                            echo     }
+                            echo }
+                        ) > proxy\\nginx.conf
+                        '''
                     }
 
+                    echo '===== VALIDATING NGINX CONFIGURATION ====='
+
+                    bat '''
+                    docker run --rm ^
+                    --network orders-network ^
+                    -v "%cd%\\proxy\\nginx.conf:/etc/nginx/nginx.conf:ro" ^
+                    nginx:alpine nginx -t
+                    '''
+
+                    echo '===== REMOVING OLD NGINX PROXY ====='
+
                     bat "docker rm -f ${PROXY_CONTAINER} 2>nul || exit /b 0"
+
+                    echo '===== STARTING NGINX PROXY ====='
 
                     bat """
                     docker run -d ^
@@ -254,6 +313,8 @@ pipeline {
                     -v "%cd%\\proxy\\nginx.conf:/etc/nginx/nginx.conf:ro" ^
                     nginx:alpine
                     """
+
+                    echo '===== WAITING FOR PROXY HEALTH ====='
 
                     timeout(time: 30, unit: 'SECONDS') {
 
@@ -303,7 +364,7 @@ pipeline {
                         oldContainer = GREEN_CONTAINER
                     }
 
-                    echo "Removing old container: ${oldContainer}"
+                    echo "===== REMOVING OLD CONTAINER: ${oldContainer} ====="
 
                     bat "docker rm -f ${oldContainer} 2>nul || exit /b 0"
                 }
