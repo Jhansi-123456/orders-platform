@@ -92,15 +92,18 @@ pipeline {
         echo '===== APPLICATION TESTS ====='
 
         bat '''
+            echo ===== INSTALLING APPLICATION DEPENDENCIES =====
             cd app
-            echo ===== INSTALLING DEPENDENCIES =====
             call npm ci --include=dev
 
             echo ===== CHECKING SUPERTEST =====
             call npm list supertest
 
+            echo ===== RETURNING TO PROJECT ROOT =====
+            cd ..
+
             echo ===== RUNNING JEST =====
-            call node_modules\\.bin\\jest --runInBand --config=../jest.config.js
+            call app\\node_modules\\.bin\\jest --runInBand --config=jest.config.js
         '''
     }
 }
